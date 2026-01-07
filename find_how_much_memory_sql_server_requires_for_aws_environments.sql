@@ -1,59 +1,3 @@
-![MIKES DATA WORK GIT REPO](https://raw.githubusercontent.com/mikesdatawork/images/master/git_mikes_data_work_banner_01.png "Mikes Data Work")        
-
-# Find How Much Memory SQL Server Requires For AWS Environments
-**Post Date: January 6, 2015**        
-
-
-
-## Contents    
-- [About Process](##About-Process)  
-- [SQL Logic](#SQL-Logic)  
-- [Author](#Author)  
-- [License](#License)       
-
-## About-Process
-
-<p>This is alittle write-up I did on determining the average memory, and io for each database instance. This is a global solution, and can be deployed across any SQL Server 2012 environment. Presently this is running on our AWS Cluster environment.
-Getting the correct trending metrics for SQL Server Memory & IO Consumption.
-
-Question:
-What can you do to configure the database environment in such a way that you can get a basic metric for how much is being used?
-
-Well… You can do this directly with just a handful of objects. It's basically a slim down SQL monitoring solution. You create a single database, and collect the daily performance information with a few queries.
-
-In my case I created a database called DBSYSMON meaning 'Database System Monitor' because I am only collecting performance information that is associated with the Database system it's self.
-The juicy part of this post is at the very bottom ( after you have created all the corresponding objects ).
-
-The SQL logic below creates the following objects to help you get things going.
-Database:   DBSYSMON
-Table:      SDIVFS_IO_STATS
-Table:      SDOPC_MAIN_TABLE
-Agent Job:  DBSYSMON_COLLECTION
-
-Note: This logic was created for SQL Server 2012 edition and later so I would only recommend running this on newer environments.
-The logic first goes to the registry to gather the default Data, and Log file paths so it will create the database according to your existing structure. Additionally; the database is set to simply recovery so you don't have to manage any log growth as a result of your table queries, or general table population.
-
-Ok so I hear you ask; What's the deal with the tables?
-Let's take this one table at a time.
-Table:  SDIVFS_IO_STATS
-Notice the prefix SDIVFS. This is basically the acronym for Sys.Dm_Io_Virtual_File_Stats so the table will store all the information from the DMV and has a Primary Key ( int identity ), and a timestamp so you can see when the performance information was collected. As you may already know the sys.dm_io_virtual_file_stats is cumulative, and only good since the last reboot, but… if you're collecting them regularly then you can trend out the data and "since last restart " is no longer the case. Some of the information will not be useful, but some of it will. You'll have to run your own queries against it to see what you can use.
-Table: SDOPC_MAIN_TABLE
-Again; the prefix is SDOPC. This is for Sys.Dm_Os_Performance_Counters. Having this information stored into a table with a timestamp can be extremely valuable. As usual; the table has a Primary Key ( int identity ).
-Agent Job: DBSYSMON_COLLECTION
-No mystery here. The DBSYSMON_COLLECTION job will simply gather up the virtual file stats, and the performance counters, and populate the tables. The SQL logic below will automatically populate the tables upon first run anyway so you can start running queries against those tables right away ( I will provide a cursory set of queries at the bottom of this post to get you started ). The SQL Agent Job is designed to run every 15 minutes, and is created under the SQL Service Account MyDomain\MySQLServiceAccount
- 
-The Job has two steps.
-1. Gather All Stats From SDOPC
-2. Gather Stats From SDIVFS
-
-I've taken the liberty of adding the 'table create' logic in the SQL Job Steps in case you feel like dropping the database and recreating… the tables will automatically be created, and populated.
-The good news the logic can be run across any SQL Server 2012 instance, and it will create the database in the correct location regardless of the instance name.
-Unless we feel the need to keep data beyond 6 months or so I would say it would be a good idea to create a 3rd Job step which includes some house cleaning. Basically removing rows that are older than 6 months, or whatever the limit works for us.</p>
-
-
-
-## SQL-Logic
-```SQL
 --To run this logic you will need SQL 'sysadmin' rights.
 --The following SQL logic creates the database:  DBSYSMON
 --DBSYSMON is where database system performance information is stored for trending, reporting etc.
@@ -72,9 +16,11 @@ Unless we feel the need to keep data beyond 6 months or so I would say it would 
  
  
 PRINT '  '
+PRINT ' **        ## Contents    - [About Process](##About-Process)  - [SQL Logic](#SQL-Logic)  - [Build Info](#Build-Info)  - [Author](#Author)  - [License](#License)       ## About-Process    <p> *********************************************************************'
 PRINT '  '
 PRINT '   RUNNING SQL LOGIC FOR DBSYSMON'
 PRINT '  '
+PRINT ' **        ## Contents    - [About Process](##About-Process)  - [SQL Logic](#SQL-Logic)  - [Build Info](#Build-Info)  - [Author](#Author)  - [License](#License)       ## About-Process    <p> *********************************************************************'
 PRINT '  '
 PRINT '  GATHERING DEFAULT DATA LOG FILE LOCATIONS FOR DATABASE CREATION'
 PRINT '  '
@@ -430,57 +376,9 @@ EndSave:
 GO
  
 PRINT '  '
+PRINT ' **        ## Contents    - [About Process](##About-Process)  - [SQL Logic](#SQL-Logic)  - [Build Info](#Build-Info)  - [Author](#Author)  - [License](#License)       ## About-Process    <p> *********************************************************************'
 PRINT '  '
 PRINT '   THE DBSYSMON DATABASE, TABLES, AND ASSOCIATED JOBS HAVE BEEN CREATED.'
 PRINT '  '
+PRINT ' **        ## Contents    - [About Process](##About-Process)  - [SQL Logic](#SQL-Logic)  - [Build Info](#Build-Info)  - [Author](#Author)  - [License](#License)       ## About-Process    <p> *********************************************************************'
 PRINT '  '
-```
-Here are a couple queries you can use to get some useful information out of the tables.
-Here's some SQL query logic to determine what the recommended amount of memory is needed for SQL Server according to the performance hit that is being carried out by any applications, or other queries. Keep in mind that are natural swings in the performance of any database system and you shouldn't haphazardly add memory, or reconfigure memory for your environment based on a few results from this query. The good news is because the information is stored in the new DBSYSMON database, and we have a timestamp associated with the performance information you can begin to trend out the average swings in performance, and provision the necessary AWS Instance Types with actual guaranteed performance data to prove the Instance Type configuration that you need.
-Whats better is that if the 'recommended memory value' is below that of existing configuration you can remove the Memory from AWS accordingly for the correct 'Intance Type' or ( memory packages ) so the Database systems that are less performance intensive can be properly managed with lower AWS 'Instance Type'
-
-
-
-## SQL-Logic
-```SQL
-select
-                'rsm_timestamp'                    = datename(dw, rsm.timestamp) + ' ' + convert(char, rsm.timestamp, 9)
-,               'rsm_cntr_value'                    = rsm.cntr_value
-,               'ssm_cntr_value'                    = ssm.cntr_value
-,               'recommended_memory_value'           = cast (rsm.cntr_value + ssm.cntr_value / 100 as varchar(10)) + ' mb'
-from
-                (select timestamp, cntr_value from sdopc_main_table where counter_name = 'Reserved Server Memory (KB)' ) rsm
-                join
-                (select timestamp, cntr_value from sdopc_main_table where counter_name = 'Stolen Server Memory (KB)' ) ssm on rsm.timestamp = ssm.[timestamp] where
-                rsm.cntr_value &gt; 0
-order by
-                rsm.timestamp desc
-```
-
-This SQL query logic will basically return all the access times to the data. Stalls will show you how long queries are waiting etc. You can use this to determine the AWS Instance Type for storage. I will try to include some queries later on with conversions from MS to something human readable.
-
-
-
-## SQL-Logic
-```SQL
-select
-                *
-from
-                sdivfs_io_stats
-
-```
-
-[![WorksEveryTime](https://forthebadge.com/images/badges/60-percent-of-the-time-works-every-time.svg)](https://shitday.de/)
-
-## Author
-
-[![Gist](https://img.shields.io/badge/Gist-MikesDataWork-<COLOR>.svg)](https://gist.github.com/mikesdatawork)
-[![Twitter](https://img.shields.io/badge/Twitter-MikesDataWork-<COLOR>.svg)](https://twitter.com/mikesdatawork)
-[![Wordpress](https://img.shields.io/badge/Wordpress-MikesDataWork-<COLOR>.svg)](https://mikesdatawork.wordpress.com/)
-
-  
-## License
-[![LicenseCCSA](https://img.shields.io/badge/License-CreativeCommonsSA-<COLOR>.svg)](https://creativecommons.org/share-your-work/licensing-types-examples/)
-
-![Mikes Data Work](https://raw.githubusercontent.com/mikesdatawork/images/master/git_mikes_data_work_banner_02.png "Mikes Data Work")
-
